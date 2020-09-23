@@ -206,7 +206,7 @@ func (this *RenameHostInRoute) HandleAdmission(
 }
 
 func main() {
-	err := CreateServerFromFlagsAndRunToTermination(&RenameHostInRoute{})
+	err := webhookCore.CreateServerFromFlagsAndRunToTermination(&RenameHostInRoute{})
 	if err != nil {
 		log.Fatalf("FAILED: %v", err)
 	}
