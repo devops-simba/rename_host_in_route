@@ -1,8 +1,9 @@
-package renamehostinroute
+package main
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -22,7 +23,7 @@ import (
 	operatorcs "github.com/openshift/client-go/operator/clientset/versioned/typed/operator/v1"
 )
 
-type renameHostInRoute struct {
+type RenameHostInRoute struct {
 	// ownedHosts list of hosts that will be handled by this webhook
 	// if a host name end with this suffix, then its name will be regenerated
 	ownedHosts []string
@@ -33,9 +34,6 @@ type renameHostInRoute struct {
 	// mutateSystemRoutes if true we will also try to mutate system routes, otherwise they will be ignored
 	mutateSystemRoutes bool
 }
-
-var ownedHosts string
-var webhook *renameHostInRoute = &renameHostInRoute{}
 
 func isRoute(kind metav1.GroupVersionKind) bool {
 	return kind.Group == "route.openshift.io" && kind.Version == "v1" && kind.Kind == "Route"
@@ -53,7 +51,7 @@ func isSystemRoute(route *routev1.Route) bool {
 	return strings.HasSuffix(route.Namespace[:n], ".openshift.io")
 }
 
-func (this *renameHostInRoute) IsOwnedHost(host string) bool {
+func (this *RenameHostInRoute) IsOwnedHost(host string) bool {
 	for i := 0; i < len(this.ownedHosts); i++ {
 		if strings.HasSuffix(host, this.ownedHosts[i]) {
 			return true
@@ -61,7 +59,7 @@ func (this *renameHostInRoute) IsOwnedHost(host string) bool {
 	}
 	return false
 }
-func (this *renameHostInRoute) GetIngressControllers() ([]operatorApi.IngressController, error) {
+func (this *RenameHostInRoute) GetIngressControllers() ([]operatorApi.IngressController, error) {
 	config := webhookCore.GetRESTConfig()
 	cs, err := operatorcs.NewForConfig(config)
 	if err != nil {
@@ -75,7 +73,7 @@ func (this *renameHostInRoute) GetIngressControllers() ([]operatorApi.IngressCon
 
 	return ingressControllers.Items, nil
 }
-func (this *renameHostInRoute) GetMatchingIngressController(
+func (this *RenameHostInRoute) GetMatchingIngressController(
 	ingressControllers []operatorApi.IngressController,
 	route *routev1.Route) (*operatorApi.IngressController, error) {
 	var routeNamespace *corev1.Namespace
@@ -108,7 +106,7 @@ func (this *renameHostInRoute) GetMatchingIngressController(
 
 	return defaultController, nil
 }
-func (this *renameHostInRoute) GenerateNewHostname(
+func (this *RenameHostInRoute) GenerateNewHostname(
 	controller *operatorApi.IngressController,
 	route *routev1.Route) string {
 	result := this.hostNameTemplate
@@ -118,17 +116,36 @@ func (this *renameHostInRoute) GenerateNewHostname(
 	return strings.Replace(result, "<router-domain>", controller.Spec.Domain, -1)
 }
 
-func (this *renameHostInRoute) Initialize() error {
-	webhook.ownedHosts = strings.Split(ownedHosts, ",")
+func (this *RenameHostInRoute) Bind() interface{} {
+	var ownedHosts string
+	flag.StringVar(&this.defaultRouter, "defaultrouter", "internal-router",
+		"if a route does not match any router, then this router will be added to the route definition")
+	flag.StringVar(&ownedHosts, "ownedhosts", ".ic.cloud.snapp.ir",
+		"a comma separated list of hosts, that if route's selected hostname end with them, it will be regenerated on change")
+	flag.StringVar(&this.hostNameTemplate, "hostnametmpl", "<name>-<ns>.<router-domain>",
+		"Template to generate host names. <name>, <ns>, <router-name>, <router-domain> will be replaced in this template")
+	flag.BoolVar(&this.mutateSystemRoutes, "mutatesysroutes", false,
+		"for performance reasons, routes that belong to the system will be ignored, by setting this you may enable checking those routes")
+
+	webhookCore.InitializeRuntimeScheme("github.com/openshift/api", openshiftApi.Install)
+	return ownedHosts
+}
+func (this *RenameHostInRoute) CompleteBinding(data interface{}) error {
+	ownedHosts, ok := data.(string)
+	if !ok {
+		return errors.New("Invalid data")
+	}
+
+	this.ownedHosts = strings.Split(ownedHosts, ",")
 	return nil
 }
 
-func (this *renameHostInRoute) Name() string { return "rename_host_in_route" }
-func (this *renameHostInRoute) Desc() string {
+func (this *RenameHostInRoute) Name() string { return "rename_host_in_route" }
+func (this *RenameHostInRoute) Desc() string {
 	return "change host name in the route based on its router"
 }
-func (this *renameHostInRoute) Path() string { return "rename-host-in-route" }
-func (this *renameHostInRoute) HandleAdmission(
+func (this *RenameHostInRoute) Path() string { return "rename-host-in-route" }
+func (this *RenameHostInRoute) HandleAdmission(
 	action string,
 	request *http.Request,
 	ar *admissionApi.AdmissionReview) (*admissionApi.AdmissionResponse, error) {
@@ -188,16 +205,9 @@ func (this *renameHostInRoute) HandleAdmission(
 	return webhookCore.CreatePatchResponse(patches)
 }
 
-func init() {
-	flag.StringVar(&webhook.defaultRouter, "defaultrouter", "internal-router",
-		"if a route does not match any router, then this router will be added to the route definition")
-	flag.StringVar(&ownedHosts, "ownedhosts", ".ic.cloud.snapp.ir",
-		"a comma separated list of hosts, that if route's selected hostname end with them, it will be regenerated on change")
-	flag.StringVar(&webhook.hostNameTemplate, "hostnametmpl", "<name>-<ns>.<router-domain>",
-		"Template to generate host names. <name>, <ns>, <router-name>, <router-domain> will be replaced in this template")
-	flag.BoolVar(&webhook.mutateSystemRoutes, "mutatesysroutes", false,
-		"for performance reasons, routes that belong to the system will be ignored, by setting this you may enable checking those routes")
-
-	webhookCore.RegisterWebhook(webhook)
-	webhookCore.InitializeRuntimeScheme("github.com/openshift/api", openshiftApi.Install)
+func main() {
+	err := CreateServerFromFlagsAndRunToTermination(&RenameHostInRoute{})
+	if err != nil {
+		log.Fatalf("FAILED: %v", err)
+	}
 }
