@@ -105,6 +105,7 @@ func (this *RenameHostInRouteMutatingWebhook) GetMatchingIngressController(
 	route *routev1.Route) (*operatorApi.IngressController, error) {
 	var routeNamespace *corev1.Namespace
 	var defaultController *operatorApi.IngressController
+	matchedControllers := []*operatorApi.IngressController{}
 	for _, controller := range ingressControllers {
 		if defaultController == nil && controller.Name == this.defaultRouter {
 			defaultController = &controller
@@ -129,11 +130,21 @@ func (this *RenameHostInRouteMutatingWebhook) GetMatchingIngressController(
 			}
 		}
 		if match {
-			return &controller, nil
+			matchedControllers = append(matchedControllers, &controller)
 		}
 	}
 
-	return defaultController, nil
+	if len(matchedControllers) == 1 {
+		return matchedControllers[0], nil
+	} else if len(matchedControllers) == 0 {
+		return defaultController, nil
+	} else {
+		if matchedControllers[0] == defaultController {
+			return matchedControllers[1], nil
+		} else {
+			return matchedControllers[0], nil
+		}
+	}
 }
 func (this *RenameHostInRouteMutatingWebhook) GenerateNewHostname(
 	controller *operatorApi.IngressController,
