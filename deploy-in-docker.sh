@@ -75,7 +75,7 @@ case $Insecure in
         fi
 
         echo "${descColor}Name of the secret that contains TLS secrets of the service${nc}"
-        echo -n "${promptColor}SecretName${nc}(${defValColor}${ApplicationName}-tls${nc}): "
+        echo -n "${promptColor}SecretName${nc}(${defValColor}${ApplicationName}${nc}): "
         read SecretName
         if ! [ -z "$SecretName" ]; then
             args="$args --secret-name '${SecretName}'"
