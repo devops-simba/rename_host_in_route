@@ -1,0 +1,98 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "rename-host"
+  namespace: "devops-webhooks"
+  labels:
+    app: "rename-host"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: "rename-host"
+  template:
+    metadata:
+      labels:
+        app: "rename-host"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1234
+      containers:
+        - name: "server"
+          image: "mehbos/rename-host:latest"
+          args:
+            - "/app/webhook_server"
+            - "-logtostderr"
+            - "-v"
+            - "10"
+            - "--port"
+            - "8443"
+            - "--cert"
+            - "/run/secrets/rename-host/tls.crt"
+            - "--key"
+            - "/run/secrets/rename-host/tls.key"
+            
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8443
+              name: "rename-host-api"
+          env:
+            # if a route does not match any router, then this router will be added to the route definition
+            - name: "DEFAULT_ROUTER"
+              value: "internal-router"
+            # a comma separated list of hosts, that if route's selected hostname end with them, it will be regenerated on change
+            - name: "OWNED_HOSTS"
+              value: ".ic.cloud.snapp.ir"
+            # Template to generate host names
+            - name: "HOST_NAME_TMPL"
+              value: "{{ .Name }}-{{ .Namespace }}.{{ .Router.Domain }}"
+            # for performance reasons, routes that belong to the system will be ignored. by setting, this you may enable checking those routes
+            - name: "MUTATE_SYSTEM_ROUTES"
+              value: "0"
+            
+          volumeMounts:
+            - name: "rename-host-tls-certs"
+              mountPath: "/run/secrets/rename-host"
+              readOnly: true
+      volumes:
+        - name: "rename-host-tls-certs"
+          secret:
+            secretName: "rename-host"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "rename-host"
+  namespace: "devops-webhooks"
+  labels:
+    app: "rename-host"
+spec:
+  selector:
+    app: "rename-host"
+  ports:
+    - port: 443
+      targetPort: "rename-host-api"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: "rename-host.devops-webhooks.svc"
+webhooks:
+- name: "rename-host-in-route.rename-host.devops-webhooks.svc"
+  clientConfig:
+    service:
+      name: "rename-host"
+      namespace: "devops-webhooks"
+      path: "/mutate/rename-host-in-route"
+    caBundle: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZRakNDQXlxZ0F3SUJBZ0lWRXFwV0xmMjNOU0VnOXIvLzNzMjRYZ3poSXE3Qk1BMEdDU3FHU0liM0RRRUIKQ3dVQU1Da3hKekFsQmdOVkJBTVRIbkpsYm1GdFpTMW9iM04wTG1SbGRtOXdjeTEzWldKb2IyOXJjeTVqWVRBZQpGdzB5TURFeE1qSXhOalUzTlRWYUZ3MHlOVEV4TWpJeE56QXlOVFZhTUNreEp6QWxCZ05WQkFNVEhuSmxibUZ0ClpTMW9iM04wTG1SbGRtOXdjeTEzWldKb2IyOXJjeTVqWVRDQ0FpSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnSVAKQURDQ0Fnb0NnZ0lCQUxtL3dYR1E0M2V5ZDl6cmxqaDY1Qlo2TUVEK1AxdzFkVkNzY2UwV0JZMTJXakFSOHo1RwpiQ1o5OHlLSXBDYXdSRFlaMkNlTDJNY1M1elVHOHNXYmJPdDZQSnpDOCtUMVJxbzhtUlBGdVJMK0dWYm1zOXhMClF2ZXQxcUl6NlNub3FQZ1U5eW55amtPWVV3c3g3RHUzOEcyTEF0WUVSUXBRdVQzVzl2dHlpZHpkaXVVazZIdHYKRWxqRHhvUXRZbG03QTJBaVBEcDFPVjJvSFBTN1dXY0s4cnN6aDh6ekRLR3h3U0syVXp1V1A4VHZwV2pBUE15VApZSmo1MkxyM3pJd1ViKzN5UG9iN2hFVzJtZWpSaVBVN0lqd2Z0ZCtweHR5YklkQ3MvVUR5N0gvNHgrVlU2ZzlUCnJSUk5xUGJUWWZucGdiTEU2akpGbllvb01LUHZIbTEvMVZENUZJQXlCU2hNbWZlTGo3aUJKU2p5c2dFOEw1a2oKZy9ndXVCUC8zVGs5UnlEUzd1T3lCcEZuVlVyRysxVXBGSzlVNmc2eGtsRkZKa3VrdC9KZGw1TXRpSzNGZW12OQp5Qnh2NHJicjJvSmNvNnRzU2lZb0MyeHJ6cFIxaDU4Y0hBWHNVTkxEOTJZYTg4OWhiQUROcmliMTgzUU5JRSswCnd1OEZtWDF3WFpTMFlkSDByNkZqTXlEaG9uY2oxemlpWkhNNTVxQXpHa2VxODV2NVE5aGgzUTZCSjloa3VhNVcKSVFFeVV4c2R0OW9yQ2ZOMVFFSU1wR0ptcjNaK2lGb2JMQm05bEdxZERTNElmaGV1WGp4cHhmcm5TVU9kMEY4UQovR25wZnVtREZBWWd1czlHK1QxaXh0OVFJVHUzdjJtK3NYUG53c1QzNGVJbkF4SEo2WmdzeG5MOUFnTUJBQUdqCllUQmZNQTRHQTFVZER3RUIvd1FFQXdJQ3BEQWRCZ05WSFNVRUZqQVVCZ2dyQmdFRkJRY0RBZ1lJS3dZQkJRVUgKQXdFd0R3WURWUjBUQVFIL0JBVXdBd0VCL3pBZEJnTlZIUTRFRmdRVTVCMHAvalFmTDYzdzMzN2IzR0tpYXVnQwpDK0l3RFFZSktvWklodmNOQVFFTEJRQURnZ0lCQUlqdFNkcGJQS094UkwvOUNlRUVwYkZpWmg4YlhhcXd4M09zCmZxZjRCMW4renlkMmhlVElxSW9xMXplZ095TnUyczN0djd0d0NTS2wxemdQTUdYVVJndEQybjVSVGVoempFZ0EKVFJGL2VsYWtNRFgyK2JMVzNFbE9pV0NBR1VFaFNNT1dMYWRucGhUVHVyQzRrbmlJNEpjZHZqd2VwaFU0bDFhQgpMSlNneGlPSERGSGtRbVQ5RC9qQkdQNjBBZWNaWk4zazlXSk9yNTE0WXV0ZmV0YjcrNXc1eG9wc3NNNWMvWC9sCkx1Q3NQR2ZLcjBkTEY4Tmo3WVdiWStiL093L0c1TGY5UmkvMmZDdmdqZyszaUs0c0dSVEhidElDaTIrcklSNTQKeUYwNmVpWXJyaU9ZeXg4UE40NmJYTXNacTA4elJWclJGNkpGWXJWZ1lBRWY3aExQeWRPNGZOdXp2UmxRL1owNQpNZVppajhJY0Rra0U2Q1d2UndIclVLcloydWZybERoK1ZwT2YrOGc0TGlwanBLQ0JCOFlUMGxnem5EL0VpRXJNCklrWXdrWFFkNVFFS1phazJvRVZmNC92R1FVNTRtMEt0U0UvTGE1czgwZnVSTUpYa2d2dFVSSXJHd2t6RU01VWkKKzZrNmR4RmV1RVExUCtWU3VRZjBCVFB6MWFwOHBSMTNsbldHZGVKYVNwZTgvUXBpYjV1QmtvZEM5RVdHSWt5bQoxQVZpZVNTVDJJdlZGNUVuZ0grVjhGb05yNzZwN1VpSzM4N1hxQ3MrWmFxb3FpNVdkOWNOdEtCMnBZWk1TdlV3CmR1eGVyUDVWQTlCeXdVVS9mQzl2amh0VjdXUHdUSUpoZ2JMZVBqa1hmR1JZWTBaTnA0SUp3VHEvYmFURHQ3NGkKTTZVcm9KV3kKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo="
+  rules:
+    - apiGroups:   ["route.openshift.io"]
+      resources:   ["*"]
+      apiVersions: ["v1"]
+      operations:  ["CREATE", "UPDATE"]
+  admissionReviewVersions: ["v1", "v1beta1"]
+  sideEffects: "None"
+  timeoutSeconds: 5
+
