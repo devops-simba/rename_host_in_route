@@ -125,6 +125,13 @@ if ! [ -z "$BuildProxy" ]; then
     args="$args --proxy '${BuildProxy}'"
 fi
 
+echo "${descColor}Level of logs of the running server${nc}"
+echo -n "${promptColor}LogLevel${nc}(0): "
+read LogLevel
+if ! [ -z "$LogLevel" ]; then
+    args="$args --level $LogLevel"
+fi
+
 echo ""
 echo "Now we build the application in a docker image and create deployment scripts with specified parameters"
 
