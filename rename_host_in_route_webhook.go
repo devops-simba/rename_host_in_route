@@ -187,6 +187,15 @@ func (this *RenameHostInRouteMutatingWebhook) Rules() []admissionRegistration.Ru
 		},
 	}
 }
+func (this *RenameHostInRouteMutatingWebhook) TimeoutInSeconds() int {
+	return webhookCore.DefaultTimeoutInSeconds
+}
+func (this *RenameHostInRouteMutatingWebhook) SupportedAdmissionVersions() []string {
+	return webhookCore.SupportedAdmissionVersions
+}
+func (this *RenameHostInRouteMutatingWebhook) SideEffects() admissionRegistration.SideEffectClass {
+	return admissionRegistration.SideEffectClassNone
+}
 func (this *RenameHostInRouteMutatingWebhook) Initialize() {
 	webhookCore.InitializeRuntimeScheme("github.com/openshift/api", openshiftApi.Install)
 }

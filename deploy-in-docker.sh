@@ -33,6 +33,14 @@ echo "I will ask you a couple of question to configure the deployment."
 echo "Almost all configurations have default value and you may accept it with just pressing ENTER"
 echo ""
 
+echo "${descColor}Name of the application${nc}"
+echo -n "${promptColor}ApplicationName${nc}(${defValColor}${ApplicationName}${nc}): "
+read AppName
+if ! [ -z "$AppName" ]; then
+    args="$args --app '$AppName'"
+    ApplicationName="$AppName"
+fi
+
 echo "${descColor}Indicate whether server should run in insecure mode(this is just for debug)${nc}"
 echo -n "${promptColor}Insecure${nc}(${defValColor}false${nc}): "
 read Insecure
@@ -117,6 +125,13 @@ if ! [ -z "$ServiceName" ]; then
     args="$args --service-name '${ServiceName}'"
 fi
 
+echo "${descColor}Name of the secret that contains TLS certificate and key for this webhook${nc}"
+echo -n "${promptColor}SecretName${nc}(${defValColor}${ApplicationName}${nc}): "
+read SecretName
+if ! [ -z "$SecretName" ]; then
+    args="$args --secret-name '${SecretName}'"
+fi
+
 echo "${descColor}If building go application require a proxy to grab packages, then you must${nc}"
 echo "${descColor}provide it here${nc}"
 echo -n "${promptColor}BuildProxy${nc}(${defValColor}no proxy required${nc}): "
@@ -133,7 +148,7 @@ if ! [ -z "$LogLevel" ]; then
 fi
 
 echo ""
-echo "Now we build the application in a docker image and create deployment scripts with specified parameters"
+echo "${orange}Now we build the application in a docker image and create deployment scripts with specified parameters${nc}"
 
 exec_command="cd /$ApplicationName && go build -o $ApplicationName && /$ApplicationName/$ApplicationName $args"
 if ! [ -z "$BuildProxy" ]; then
