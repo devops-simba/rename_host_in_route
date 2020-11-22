@@ -114,6 +114,15 @@ func (this *RenameHostInRouteMutatingWebhook) GetMatchingIngressController(
 		match := true
 		if controller.Spec.RouteSelector != nil {
 			match = webhookCore.IsMatch(&route.ObjectMeta, controller.Spec.RouteSelector)
+			if log.V(10) {
+				labels, _ := json.Marshal(route.ObjectMeta.Labels)
+				routeSelector, _ := json.Marshal(controller.Spec.RouteSelector)
+				log.Infof("Route(%s: %v) match Controller(%s, %v) => %v",
+					route.Name, string(labels),
+					controller.Name, string(routeSelector),
+					match,
+				)
+			}
 		}
 		if match && controller.Spec.NamespaceSelector != nil {
 			// this controller use namespace selector, so we need information of namespace of the route
@@ -127,6 +136,15 @@ func (this *RenameHostInRouteMutatingWebhook) GetMatchingIngressController(
 
 			if err == nil {
 				match = webhookCore.IsMatch(&routeNamespace.ObjectMeta, controller.Spec.NamespaceSelector)
+				if log.V(10) {
+					labels, _ := json.Marshal(routeNamespace.ObjectMeta.Labels)
+					nsSelector, _ := json.Marshal(controller.Spec.NamespaceSelector)
+					log.Infof("Namespace(%s: %v) match Controller(%s, %v) => %v",
+						routeNamespace.Name, string(labels),
+						controller.Name, string(nsSelector),
+						match,
+					)
+				}
 			}
 		}
 		if match {
