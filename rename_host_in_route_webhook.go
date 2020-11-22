@@ -104,11 +104,12 @@ func (this *RenameHostInRouteMutatingWebhook) GetMatchingIngressController(
 	ingressControllers []operatorApi.IngressController,
 	route *routev1.Route) (*operatorApi.IngressController, error) {
 	var routeNamespace *corev1.Namespace
-	var defaultController *operatorApi.IngressController
-	matchedControllers := []*operatorApi.IngressController{}
-	for _, controller := range ingressControllers {
-		if defaultController == nil && controller.Name == this.defaultRouter {
-			defaultController = &controller
+	defaultController := -1
+	matchedControllers := []int{}
+	for i := 0; i < len(ingressControllers); i++ {
+		controller := &ingressControllers[i]
+		if defaultController == -1 && controller.Name == this.defaultRouter {
+			defaultController = i
 		}
 
 		match := true
@@ -148,30 +149,34 @@ func (this *RenameHostInRouteMutatingWebhook) GetMatchingIngressController(
 			}
 		}
 		if match {
-			matchedControllers = append(matchedControllers, &controller)
+			matchedControllers = append(matchedControllers, i)
 		}
 	}
 
 	if log.V(10) {
 		matchedControllerNames := make([]string, len(matchedControllers))
 		for i := 0; i < len(matchedControllers); i++ {
-			matchedControllerNames[i] = matchedControllers[i].Name
+			matchedControllerNames[i] = ingressControllers[matchedControllers[i]].Name
 		}
 		log.Infof("Matched controllers: %v", matchedControllerNames)
 	}
 	var result *operatorApi.IngressController
 	if len(matchedControllers) == 1 {
-		result = matchedControllers[0]
+		result = &ingressControllers[matchedControllers[0]]
 		log.V(10).Infof("Selected %s as matched controller(only match)", result.Name)
 	} else if len(matchedControllers) == 0 {
-		result = defaultController
-		log.V(10).Infof("Selected default-controller(%s) as matched controller(no match found)", result.Name)
+		if defaultController == -1 {
+			log.V(10).Infof("No controller matched the route and there is no default controller")
+		} else {
+			result = &ingressControllers[defaultController]
+			log.V(10).Infof("Selected default-controller(%s) as matched controller(no match found)", result.Name)
+		}
 	} else {
 		if matchedControllers[0] == defaultController {
-			result = matchedControllers[1]
+			result = &ingressControllers[matchedControllers[1]]
 			log.V(10).Infof("Selected next-controller(%s) as matched controller(more than one match)", result.Name)
 		} else {
-			result = matchedControllers[0]
+			result = &ingressControllers[matchedControllers[0]]
 			log.V(10).Infof("Selected first-controller(%s) as matched controller(more than one match)", result.Name)
 		}
 	}
