@@ -148,7 +148,7 @@ if ! [ -z "$LogLevel" ]; then
 fi
 
 echo ""
-echo "${orange}Now we build the application in a docker image and create deployment scripts with specified parameters${nc}"
+echo "${orange}Build the application in a docker image and create deployment scripts with specified parameters${nc}"
 
 exec_command="cd /$ApplicationName && go build -o $ApplicationName && /$ApplicationName/$ApplicationName $args"
 if ! [ -z "$BuildProxy" ]; then
