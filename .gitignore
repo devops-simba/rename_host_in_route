@@ -1,1 +1,4 @@
 go.sum
+/deployment-scripts
+/deploy.sh
+/rename_host_in_route
