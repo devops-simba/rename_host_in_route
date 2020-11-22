@@ -177,8 +177,9 @@ func (this *RenameHostInRouteMutatingWebhook) Rules() []admissionRegistration.Ru
 		admissionRegistration.RuleWithOperations{
 			Rule: admissionRegistration.Rule{
 				APIGroups:   []string{"route.openshift.io"},
-				Resources:   []string{"Route"},
+				Resources:   []string{"*"},
 				APIVersions: []string{"v1"},
+				Scope:       nil, // any scope
 			},
 			Operations: []admissionRegistration.OperationType{
 				admissionRegistration.Create,
