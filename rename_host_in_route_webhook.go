@@ -152,17 +152,31 @@ func (this *RenameHostInRouteMutatingWebhook) GetMatchingIngressController(
 		}
 	}
 
+	if log.V(10) {
+		matchedControllerNames := make([]string, len(matchedControllers))
+		for i := 0; i < len(matchedControllers); i++ {
+			matchedControllerNames[i] = matchedControllers[i].Name
+		}
+		log.Infof("Matched controllers: %v", matchedControllerNames)
+	}
+	var result *operatorApi.IngressController
 	if len(matchedControllers) == 1 {
-		return matchedControllers[0], nil
+		result = matchedControllers[0]
+		log.V(10).Infof("Selected %s as matched controller(only match)", result.Name)
 	} else if len(matchedControllers) == 0 {
-		return defaultController, nil
+		result = defaultController
+		log.V(10).Infof("Selected default-controller(%s) as matched controller(no match found)", result.Name)
 	} else {
 		if matchedControllers[0] == defaultController {
-			return matchedControllers[1], nil
+			result = matchedControllers[1]
+			log.V(10).Infof("Selected next-controller(%s) as matched controller(more than one match)", result.Name)
 		} else {
-			return matchedControllers[0], nil
+			result = matchedControllers[0]
+			log.V(10).Infof("Selected first-controller(%s) as matched controller(more than one match)", result.Name)
 		}
 	}
+
+	return result, nil
 }
 func (this *RenameHostInRouteMutatingWebhook) GenerateNewHostname(
 	controller *operatorApi.IngressController,
