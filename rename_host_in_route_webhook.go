@@ -309,8 +309,8 @@ func (this *RenameHostInRouteMutatingWebhook) HandleAdmission(
 	for i := 0; i < len(route.Status.Ingress); i++ {
 		if route.Status.Ingress[i].RouterName != routeController.Name {
 			for j := 0; j < len(route.Status.Ingress[i].Conditions); j++ {
-				path := fmt.Sprintf("/status/ingress/%d/conditions/%d/status", i, j)
 				if route.Status.Ingress[i].Conditions[j].Status != corev1.ConditionFalse {
+					path := fmt.Sprintf("/status/ingress/%d/conditions/%d/status", i, j)
 					patches = append(patches, webhookCore.NewReplacePatch(path, corev1.ConditionFalse))
 				}
 			}
