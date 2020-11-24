@@ -21,131 +21,178 @@ nc="\033[0m"
 descColor=$darkGray
 promptColor=$green
 defValColor=$white
+requiredColor=$orange
 required="${orange}REQUIRED${nc}"
 
 ApplicationDir=`realpath "$(dirname $0)"`
-ApplicationName=`echo $(basename "$ApplicationDir") | sed -e "s/_/-/g"`
+DefaultApplicationName=`echo $(basename "$ApplicationDir") | sed -e "s/_/-/g"`
 DefaultNamespace="devops-webhooks"
 
 args="--command deploy --folder deployment-scripts"
+
+set_var() {
+    variableName="$1"
+    value="$2"
+    eval "$variableName='$value'"
+}
+get_var() {
+    eval "RESULT=\"\${$1}\""
+}
+
+# this function show a prompt to user and read its value from the user
+# usage: read_option desc title default prev [result=title]
+read_option() {
+    desc="$1"
+    title="$2"
+    defaultValue="$3"
+    prevValue="$4"
+    resultVar="$5"
+    resultVar="${resultVar:-${title}}"
+
+    defval="${prevValue:-${defaultValue}}"
+    if [ \( "$AUTO_RESPONSE" = "TRUE" \) -a \( -n "$defval" \) ]; then
+        set_var "$resultVar" "$defval"
+        return 0
+    fi
+
+    if [ -n "$defval" ]; then
+        echo "${descColor}${desc}${nc}"
+        echo -n "${promptColor}${title}${nc}(${defValColor}${defval}${nc}): "
+        read RESULT
+        RESULT="${RESULT:-${prevValue:-$defaultValue}}"
+        if [ "$RESULT" = "$defaultValue" ]; then
+            RESULT=""
+        fi
+    else
+        # this option have no previous value nor any default value, so it is required
+        echo "${descColor}${desc}${nc}."
+        echo "${descColor}this parameter is ${requiredColor}REQUIRED${nc}"
+        while [ -z "$RESULT" ]; do
+            echo -n "${requiredColor}${title}${nc}: "
+            read RESULT
+        done
+    fi
+    set_var "$resultVar" "$RESULT"
+}
 
 echo "I will ask you a couple of question to configure the deployment."
 echo "Almost all configurations have default value and you may accept it with just pressing ENTER"
 echo ""
 
-echo "${descColor}Name of the application${nc}"
-echo -n "${promptColor}ApplicationName${nc}(${defValColor}${ApplicationName}${nc}): "
-read AppName
-if ! [ -z "$AppName" ]; then
-    args="$args --app '$AppName'"
-    ApplicationName="$AppName"
+if [ -f "./.responses" ]; then
+    . ./.responses
 fi
 
-echo "${descColor}Indicate whether server should run in insecure mode(this is just for debug)${nc}"
-echo -n "${promptColor}Insecure${nc}(${defValColor}false${nc}): "
-read Insecure
+read_option "Name of the application" "ApplicationName" "$DefaultApplicationName" "$ApplicationName"
+if [ -n "$ApplicationName" ]; then
+    args="$args --app '$ApplicationName'"
+fi
+
+read_option "Indicate whether server should run in insecure mode(just for debug)" "Insecure" "false" "$Insecure"
 case $Insecure in
     yes|1|true|ok)
+        Insecure="true" # make its value fixed
         args="${args} --insecure"
         echo "${orange}Warning: Insecure mode enabled${nc}"
         ;;
     *)
-        echo "${descColor}Certificate file that should used by the webhook for secure connection${nc}"
-        echo -n "${promptColor}Certificate${nc}(${defValColor}An auto generated certificate${nc}): "
-        read Certificate
-        if ! [ -z "$Certificate" ]; then
+        Insecure=""
+        read_option "Certificate file that should used by the webhook for secure connection" "Cetificate" "AUTO" "$Certificate"
+        if [ -n "$Certificate" ]; then
             args="$args --cert '$Certificate'"
-            echo "${descColor}Private key file that should used together with certificate${nc}"
-            while [ -z "$PrivateKey" ]; do
-                echo -n "${promptColor}PrivateKey${nc}(${required}): "
-                read PrivateKey
-                if [ -z "$PrivateKey" ]; then
-                    echo "${red}When you specify the certificate then its private key is required${nc}"
-                fi
-            done
-            args="$args --key ${PrivateKey}"
 
-            echo "${descColor}If this certificate is signed by a custom CA, then you must provide the${nc}"
-            echo "${descColor}file that contains certificate of that CA here${nc}"
-            echo -n "${promptColor}CAFile$nc}(${defValColor}EMPTY${nc}): "
-            read -n CAFile
-            if ! [ -z "$CAFile" ]; then
-                args="$args --ca '${CAFile}'"
+            read_option "Private key file that should used together with certificate" "PrivateKey" "" "$PrivateKey"
+            args="$args --key '$PrivateKey'"
+
+            read_option "If this certificate is signed by a custom CA, then you must provide the file that contains certificate of that CA here" "CAFile", "", "$CAFile"
+            if [ -n "$CAFile" ]; then
+                args="$args --ca '$CAFile'"
             fi
         fi
 
-        echo "${descColor}Name of the secret that contains TLS secrets of the service${nc}"
-        echo -n "${promptColor}SecretName${nc}(${defValColor}${ApplicationName}${nc}): "
-        read SecretName
-        if ! [ -z "$SecretName" ]; then
-            args="$args --secret-name '${SecretName}'"
+        read_option "Name of the secret that contains TLS secrets of the service" "SecretName" "$ApplicationName" "$SecretName"
+        if [ -n "$SecretName" ]; then
+            args="$args --secret-name '$SecretName'"
         fi
         ;;
 esac
 
-echo "${descColor}Name of the image that will be created from this application.${nc}"
-echo -n "${promptColor}ImageName${nc}(${defValColor}${ApplicationName}${nc}): "
-read ImageName
-if ! [ -z "$ImageName" ]; then
+read_option "Name of the image that will be created from this application" "ImageName" "$ApplicationName" "$ImageName"
+if [ -n "$ImageName" ]; then
     args="$args --image '$ImageName'"
 fi
 
-echo "${descColor}Tag of the created image${nc}"
-echo -n "${promptColor}ImageTag${nc}(${defValColor}latest${nc}): "
-read ImageTag
-if ! [ -z "$ImageTag" ]; then
+read_option "Tag of the created image" "ImageTag" "latest" "$ImageTag"
+if [ -n "$ImageTag" ]; then
     args="$args --tag '$ImageTag'"
 fi
 
-echo "${descColor}Registry that image should pushed to it. You must already be logged into this repository${nc}"
-echo -n "${promptColor}ImageRegistry${nc}(${defValColor}system default registry${nc}): "
-read ImageRegistry
-if ! [ -z "$ImageRegistry" ]; then
+read_option "Registry that image should pushed to it. You must already be logged into this repository" "ImageRegistry" "DEFAULT" "$ImageRegistry"
+if [ -n "$ImageRegistry" ]; then
     args="$args --registry '$ImageRegistry'"
 fi
 
-echo "${descColor}If you want to run the image as a non-root user, you must specify its user ID here${nc}"
-echo -n "${promptColor}RunAsUser${nc}(${defValColor}1234${nc}): "
-read RunAsUser
-if ! [ -z "$RunAsUser" ]; then
+read_option "If you want to run the image as a non-root user, you must specify its user ID here" "RunAsUser" "1234" "$RunAsUser"
+if [ -n "$RunAsUser" ]; then
     args="$args --runas '$RunAsUser'"
 fi
 
-echo "${descColor}Namespace that webhook should deployed to it.${nc}"
-echo -n "${promptColor}WebhookNamespace${nc}(${defValColor}${DefaultNamespace}${nc}): "
-read Namespace
-if ! [ -z "$Namespace" ]; then
-    args="$args --namespace '$Namespace'"
+read_option "Namespace that webhook should deployed to it" "WebhookNamespace" "$DefaultNamespace" "$WebhookNamespace"
+if [ -n "$WebhookNamespace" ]; then
+    args="$args --namespace '$WebhookNamespace'"
 fi
 
-echo "${descColor}Name of the service of this webhook${nc}"
-echo -n "${promptColor}ServiceName${nc}(${defValColor}${ApplicationName}${nc}): "
-read ServiceName
-if ! [ -z "$ServiceName" ]; then
-    args="$args --service-name '${ServiceName}'"
+read_option "Name of the service of this webhook" "ServiceName" "$ApplicationName" "$ServiceName"
+if [ -n "$ServiceName" ]; then
+    args="$args --service-name '$ServiceName'"
 fi
 
-echo "${descColor}Name of the secret that contains TLS certificate and key for this webhook${nc}"
-echo -n "${promptColor}SecretName${nc}(${defValColor}${ApplicationName}${nc}): "
-read SecretName
-if ! [ -z "$SecretName" ]; then
-    args="$args --secret-name '${SecretName}'"
+read_option "User that should used for the service" "ServiceUser" "default user" "$ServiceUser"
+if [ -n "$ServiceUser" ]; then
+    args="$args --service-user '$ServiceUser'"
 fi
 
-echo "${descColor}If building go application require a proxy to grab packages, then you must${nc}"
-echo "${descColor}provide it here${nc}"
-echo -n "${promptColor}BuildProxy${nc}(${defValColor}no proxy required${nc}): "
-read BuildProxy
-if ! [ -z "$BuildProxy" ]; then
+read_option "Name of the secret that contains TLS certificate and key for this webhook" "SecretName" "$ApplicationName" "$SecretName"
+if [ -n "$SecretName" ]; then
+    args="$args --secret-name '$SecretName'"
+fi
+
+read_option "If building go application require a proxy to grab packages, write it here" "BuildProxy" "no proxy" "$BuildProxy"
+if [ -n "$BuildProxy" ]; then
     args="$args --proxy '${BuildProxy}'"
 fi
 
-echo "${descColor}Level of logs of the running server${nc}"
-echo -n "${promptColor}LogLevel${nc}(0): "
-read LogLevel
-if ! [ -z "$LogLevel" ]; then
+read_option "Level of logs of the running server" "LogLevel" "0" "$LogLevel"
+if [ -n "$LogLevel" ]; then
     args="$args --level $LogLevel"
 fi
+
+read_option "kubectl command" "Kubectl" "kubectl" "$Kubectl"
+if [ -n "$Kubectl" ]; then
+    args="$args --kubectl '$Kubectl'"
+fi
+
+if [ -f "./.responses" ]; then
+    rm -rf ./.responses
+fi
+
+# create a response cache
+echo "ApplicationName='$ApplicationName'" >> ./.responses
+echo "Insecure='$Insecure'" >> ./.responses
+echo "Certificate='$Certificate'" >> ./.responses
+echo "PrivateKey='$PrivateKey'" >> ./.responses
+echo "CAFile='$CAFile'" >> ./.responses
+echo "SecretName='$SecretName'" >> ./.responses
+echo "ImageName='$ImageName'" >> ./.responses
+echo "ImageTag='$ImageTag'" >> ./.responses
+echo "ImageRegistry='$ImageRegistry'" >> ./.responses
+echo "RunAsUser='$RunAsUser'" >> ./.responses
+echo "WebhookNamespace='$WebhookNamespace'" >> ./.responses
+echo "ServiceName='$ServiceName'" >> ./.responses
+echo "ServiceUser='$ServiceUser'" >> ./.responses
+echo "BuildProxy='$BuildProxy'" >> ./.responses
+echo "LogLevel='$LogLevel'" >> ./.responses
+echo "Kubectl='$Kubectl'" >> ./.responses
 
 echo ""
 echo "${orange}Build the application in a docker image and create deployment scripts with specified parameters${nc}"
@@ -155,8 +202,11 @@ if ! [ -z "$BuildProxy" ]; then
     exec_command="export HTTP_PROXY='$BuildProxy'; export HTTPS_PROXY='$BuildProxy'; $exec_command"
 fi
 
+mkdir "$ApplicationDir/.pkg"
+echo "Creating the application using: ${orange}$exec_command${nc}"
+
 rm -rf "$ApplicationDir/$ApplicationName"   # make sure that executive does not exists
-docker run -it --rm -v "$ApplicationDir:/$ApplicationName" golang:alpine3.12 /bin/sh -c "$exec_command"
+docker run -it --rm -v "$ApplicationDir:/$ApplicationName" -v "$ApplicationDir/.pkg:/go/pkg" golang:alpine3.12 /bin/sh -c "$exec_command"
 rm -rf "$ApplicationDir/$ApplicationName"
 
-echo "Now you may run ${white}deploy.sh${nc} to deploy the application"
+echo "Now you may run ${green}deploy.sh${nc} to deploy the application"
