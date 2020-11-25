@@ -317,5 +317,6 @@ func (this *RenameHostInRouteMutatingWebhook) HandleAdmission(
 		}
 	}
 
+	log.V(10).Infof("Sending %v as response to the client", patches)
 	return webhookCore.CreatePatchResponse(patches)
 }
