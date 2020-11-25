@@ -202,7 +202,7 @@ if ! [ -z "$BuildProxy" ]; then
     exec_command="export HTTP_PROXY='$BuildProxy'; export HTTPS_PROXY='$BuildProxy'; $exec_command"
 fi
 
-mkdir "$ApplicationDir/.pkg"
+mkdir -p "$ApplicationDir/.pkg"
 echo "Creating the application using: ${orange}$exec_command${nc}"
 
 rm -rf "$ApplicationDir/$ApplicationName"   # make sure that executive does not exists
