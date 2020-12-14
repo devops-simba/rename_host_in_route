@@ -32,6 +32,8 @@ type RenameHostInRouteMutatingWebhook struct {
 	defaultRouter string
 	// hostNameTemplate template that host names should created from it
 	hostNameTemplate *template.Template
+	// hostRenameTemplate template that we use to rename host for a route that already have a host name
+	hostRenameTemplate *template.Template
 	// mutateSystemRoutes if true we will also try to mutate system routes, otherwise they will be ignored
 	mutateSystemRoutes bool
 }
@@ -41,9 +43,10 @@ type RouterData struct {
 	Domain string
 }
 type HostnameRenderData struct {
-	Name      string
-	Namespace string
-	Router    RouterData
+	Name         string
+	Namespace    string
+	UserHostName string
+	Router       RouterData
 }
 
 var trueStrings = []string{"true", "yes", "1", "ok"}
@@ -52,13 +55,28 @@ func toBool(value string) bool {
 	return helpers.ContainsString(trueStrings, strings.ToLower(value))
 }
 
+const (
+	env_OwnedHosts            = "OWNED_HOSTS"
+	envdef_OwnedHosts         = ".ic.cloud.snapp.ir,.afr.cloud.snapp.ir"
+	env_DefaultRouter         = "DEFAULT_ROUTER"
+	envdef_DefaultRouter      = "internal-router"
+	env_HostNameTmpl          = "HOST_NAME_TMPL"
+	envdef_HostNameTmpl       = "{{ .Name }}-{{ .Namespace }}.{{ .Router.Domain }}"
+	env_HostRenameTmpl        = "HOST_RENAME_TMPL"
+	envdef_HostRenameTmpl     = "{{ .UserHostName }}.{{ .Router.Domain }}"
+	env_MutateSystemRoutes    = "MUTATE_SYSTEM_ROUTES"
+	envdef_MutateSystemRoutes = "0"
+)
+
 func NewRenameHostInRouteMutatingWebhook() *RenameHostInRouteMutatingWebhook {
 	return &RenameHostInRouteMutatingWebhook{
-		ownedHosts:    strings.Split(helpers.ReadEnv("OWNED_HOSTS", ".ic.cloud.snapp.ir"), ","),
-		defaultRouter: helpers.ReadEnv("DEFAULT_ROUTER", "internal-router"),
-		hostNameTemplate: webhookCore.MustParseTemplate("hostName",
-			helpers.ReadEnv("HOST_NAME_TMPL", "{{ .Name }}-{{ .Namespace }}.{{ .Router.Domain }}")),
-		mutateSystemRoutes: toBool(helpers.ReadEnv("MUTATE_SYSTEM_ROUTES", "0")),
+		ownedHosts:    strings.Split(helpers.ReadEnv(env_OwnedHosts, envdef_OwnedHosts), ","),
+		defaultRouter: helpers.ReadEnv(env_DefaultRouter, envdef_DefaultRouter),
+		hostNameTemplate: template.Must(helpers.ParseTemplate("hostName",
+			helpers.ReadEnv(env_HostNameTmpl, envdef_HostNameTmpl))),
+		hostRenameTemplate: template.Must(helpers.ParseTemplate("hostRename",
+			helpers.ReadEnv(env_HostRenameTmpl, envdef_HostRenameTmpl))),
+		mutateSystemRoutes: toBool(helpers.ReadEnv(env_MutateSystemRoutes, envdef_MutateSystemRoutes)),
 	}
 }
 
@@ -183,13 +201,21 @@ func (this *RenameHostInRouteMutatingWebhook) GetMatchingIngressController(
 
 	return result, nil
 }
-func (this *RenameHostInRouteMutatingWebhook) GenerateNewHostname(
+func (this *RenameHostInRouteMutatingWebhook) GenerateHostname(
 	controller *operatorApi.IngressController,
-	route *routev1.Route) string {
+	route *routev1.Route,
+	userHostName string) string {
 	builder := &strings.Builder{}
-	this.hostNameTemplate.Execute(builder, HostnameRenderData{
-		Name:      route.Name,
-		Namespace: route.Namespace,
+	var tmpl *template.Template
+	if userHostName == "" {
+		tmpl = this.hostNameTemplate
+	} else {
+		tmpl = this.hostRenameTemplate
+	}
+	tmpl.Execute(builder, HostnameRenderData{
+		Name:         route.Name,
+		Namespace:    route.Namespace,
+		UserHostName: userHostName,
 		Router: RouterData{
 			Name:   controller.Name,
 			Domain: controller.Spec.Domain,
@@ -197,7 +223,6 @@ func (this *RenameHostInRouteMutatingWebhook) GenerateNewHostname(
 	})
 	return builder.String()
 }
-
 func createConfig(name, defaultValue, desc string) webhookCore.WebhookConfiguration {
 	return webhookCore.WebhookConfiguration{
 		Name:         name,
@@ -212,13 +237,15 @@ func (this *RenameHostInRouteMutatingWebhook) Type() webhookCore.AdmissionWebhoo
 }
 func (this *RenameHostInRouteMutatingWebhook) Configurations() []webhookCore.WebhookConfiguration {
 	return []webhookCore.WebhookConfiguration{
-		createConfig("DEFAULT_ROUTER", "internal-router",
-			"if a route does not match any router, then this router will be added to the route definition"),
-		createConfig("OWNED_HOSTS", ".ic.cloud.snapp.ir",
+		createConfig(env_OwnedHosts, envdef_OwnedHosts,
 			"a comma separated list of hosts, that if route's selected hostname end with them, it will be regenerated on change"),
-		createConfig("HOST_NAME_TMPL", "{{ .Name }}-{{ .Namespace }}.{{ .Router.Domain }}",
+		createConfig(env_DefaultRouter, envdef_DefaultRouter,
+			"if a route does not match any router, then this router will be added to the route definition"),
+		createConfig(env_HostNameTmpl, envdef_HostNameTmpl,
 			"Template to generate host names"),
-		createConfig("MUTATE_SYSTEM_ROUTES", "0",
+		createConfig(env_HostRenameTmpl, envdef_HostRenameTmpl,
+			"Template to rename host name of a route that already have a host"),
+		createConfig(env_MutateSystemRoutes, envdef_MutateSystemRoutes,
 			"for performance reasons, routes that belong to the system will be ignored. by setting, this you may enable checking those routes"),
 	}
 }
@@ -297,23 +324,14 @@ func (this *RenameHostInRouteMutatingWebhook) HandleAdmission(
 
 	// Get list of ingress controllers to find the ingress controller that match this route
 	if route.Spec.Host == "" {
-		newHostName := this.GenerateNewHostname(routeController, &route)
+		newHostName := this.GenerateHostname(routeController, &route, "")
 		patches = append(patches, webhookCore.NewAddPatch("/spec/host", newHostName))
 	} else if this.IsOwnedHost(route.Spec.Host) {
-		newHostName := this.GenerateNewHostname(routeController, &route)
+		nHostName := strings.IndexByte(route.Spec.Host, '.')
+		userHostName := route.Spec.Host[:nHostName]
+		newHostName := this.GenerateHostname(routeController, &route, userHostName)
 		if newHostName != route.Spec.Host {
 			patches = append(patches, webhookCore.NewReplacePatch("/spec/host", newHostName))
-		}
-	}
-
-	for i := 0; i < len(route.Status.Ingress); i++ {
-		if route.Status.Ingress[i].RouterName != routeController.Name {
-			for j := 0; j < len(route.Status.Ingress[i].Conditions); j++ {
-				if route.Status.Ingress[i].Conditions[j].Status != corev1.ConditionFalse {
-					path := fmt.Sprintf("/status/ingress/%d/conditions/%d/status", i, j)
-					patches = append(patches, webhookCore.NewReplacePatch(path, corev1.ConditionFalse))
-				}
-			}
 		}
 	}
 

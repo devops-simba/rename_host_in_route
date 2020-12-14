@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	log "github.com/golang/glog"
 
 	webhookCore "github.com/devops-simba/webhook_core"
 )
